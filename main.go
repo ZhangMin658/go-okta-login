@@ -11,7 +11,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 
 	"github.com/gorilla/sessions"
@@ -37,131 +36,65 @@ func generateState() string {
 	return hex.EncodeToString(b)
 }
 
+func middlewareOne(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Executing middlewareOne")
+		next.ServeHTTP(w, r)
+		log.Println("Executing middlewareOne again")
+	})
+}
+
+func middlewareTwo(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Executing middlewareTwo")
+		if r.URL.Path == "/foo" {
+			return
+		}
+
+		next.ServeHTTP(w, r)
+		log.Println("Executing middlewareTwo again")
+	})
+}
+
 func main() {
 	oktaUtils.ParseEnvironment()
 
-	http.HandleFunc("/", HomeHandler)
-	http.HandleFunc("/login", LoginHandler)
-	http.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
-	http.HandleFunc("/profile", ProfileHandler)
-	http.HandleFunc("/logout", LogoutHandler)
+	// http.HandleFunc("/", HomeHandler)
+	// http.HandleFunc("/login", LoginHandler)
+	// http.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
+	// http.HandleFunc("/profile", ProfileHandler)
+	// http.HandleFunc("/logout", LogoutHandler)
 
-	log.Print("server starting at localhost:8080 ... ")
-	err := http.ListenAndServe("localhost:8080", nil)
-	if err != nil {
-		log.Printf("the HTTP server failed to start: %s", err)
-		os.Exit(1)
-	}
-}
+	mux := http.NewServeMux()
 
-func HomeHandler(w http.ResponseWriter, r *http.Request) {
-	type customData struct {
-		Profile         map[string]string
-		IsAuthenticated bool
-	}
+	// mux.HandleFunc("/", HomeHandler)
+	// mux.HandleFunc("/login", LoginHandler)
+	// mux.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
+	// mux.HandleFunc("/profile", ProfileHandler)
+	// mux.HandleFunc("/logout", LogoutHandler)
+	// mux.HandleFunc("/json-output", jsonOutput)
 
-	data := customData{
-		Profile:         getProfileData(r),
-		IsAuthenticated: isAuthenticated(r),
-	}
-	tpl.ExecuteTemplate(w, "home.gohtml", data)
-}
+	HomeHandler := http.HandlerFunc(HomeHandler)
+	mux.Handle("/", middlewareOne(middlewareTwo(HomeHandler)))
+	LoginHandler := http.HandlerFunc(LoginHandler)
+	mux.Handle("/login", middlewareOne(middlewareTwo(LoginHandler)))
+	AuthCodeCallbackHandler := http.HandlerFunc(AuthCodeCallbackHandler)
+	mux.Handle("/authorization-code/callback", middlewareOne(middlewareTwo(AuthCodeCallbackHandler)))
+	ProfileHandler := http.HandlerFunc(ProfileHandler)
+	mux.Handle("/profile", middlewareOne(middlewareTwo(ProfileHandler)))
+	LogoutHandler := http.HandlerFunc(LogoutHandler)
+	mux.Handle("/logout", middlewareOne(middlewareTwo(LogoutHandler)))
+	jsonOutput := http.HandlerFunc(jsonOutput)
+	mux.Handle("/json-output", middlewareOne(middlewareTwo(jsonOutput)))
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Cache-Control", "no-cache") // See https://github.com/okta/samples-golang/issues/20
+	http.ListenAndServe(":8080", mux)
 
-	nonce, _ = oktaUtils.GenerateNonce()
-	type customData struct {
-		Profile         map[string]string
-		IsAuthenticated bool
-		BaseUrl         string
-		ClientId        string
-		Issuer          string
-		State           string
-		Nonce           string
-	}
-
-	issuerParts, _ := url.Parse(os.Getenv("ISSUER"))
-	baseUrl := issuerParts.Scheme + "://" + issuerParts.Hostname()
-
-	data := customData{
-		Profile:         getProfileData(r),
-		IsAuthenticated: isAuthenticated(r),
-		BaseUrl:         baseUrl,
-		ClientId:        os.Getenv("CLIENT_ID"),
-		Issuer:          os.Getenv("ISSUER"),
-		State:           state,
-		Nonce:           nonce,
-	}
-	tpl.ExecuteTemplate(w, "login.gohtml", data)
-}
-
-func AuthCodeCallbackHandler(w http.ResponseWriter, r *http.Request) {
-	// Check the state that was returned in the query string is the same as the above state
-	if r.URL.Query().Get("state") != state {
-		fmt.Fprintln(w, "The state was not as expected")
-		return
-	}
-	// Make sure the code was provided
-	if r.URL.Query().Get("code") == "" {
-		fmt.Fprintln(w, "The code was not returned or is not accessible")
-		return
-	}
-
-	exchange := exchangeCode(r.URL.Query().Get("code"), r)
-
-	if exchange.Error != "" {
-		fmt.Println(exchange.Error)
-		fmt.Println(exchange.ErrorDescription)
-		return
-	}
-
-	session, err := sessionStore.Get(r, "okta-custom-login-session-store")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-
-	_, verificationError := verifyToken(exchange.IdToken)
-
-	if verificationError != nil {
-		fmt.Println(verificationError)
-	}
-
-	if verificationError == nil {
-		session.Values["id_token"] = exchange.IdToken
-		session.Values["access_token"] = exchange.AccessToken
-
-		session.Save(r, w)
-	}
-
-	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func ProfileHandler(w http.ResponseWriter, r *http.Request) {
-	type customData struct {
-		Profile         map[string]string
-		IsAuthenticated bool
-	}
-
-	data := customData{
-		Profile:         getProfileData(r),
-		IsAuthenticated: isAuthenticated(r),
-	}
-	tpl.ExecuteTemplate(w, "profile.gohtml", data)
-}
-
-func LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	session, err := sessionStore.Get(r, "okta-custom-login-session-store")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-
-	delete(session.Values, "id_token")
-	delete(session.Values, "access_token")
-
-	session.Save(r, w)
-
-	http.Redirect(w, r, "/", http.StatusFound)
+	// log.Print("server starting at localhost:8080 ... ")
+	// err := http.ListenAndServe(":8080", mux)
+	// if err != nil {
+	// 	log.Printf("the HTTP server failed to start: %s", err)
+	// 	os.Exit(1)
+	// }
 }
 
 func exchangeCode(code string, r *http.Request) Exchange {
