@@ -10,7 +10,7 @@ type Profile struct {
 	Hobbies []string
 }
 
-func jsonOutput(w http.ResponseWriter, r *http.Request) {
+func JsonHandler(w http.ResponseWriter, r *http.Request) {
 	profile := Profile{"Alex", []string{"snowboarding", "programming"}}
 
 	js, err := json.Marshal(profile)

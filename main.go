@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	verifier "github.com/okta/okta-jwt-verifier-golang"
 	oktaUtils "github.com/okta/samples-golang/custom-login/utils"
@@ -36,71 +37,40 @@ func generateState() string {
 	return hex.EncodeToString(b)
 }
 
-// func middleware(next http.Handler) http.Handler {
-// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// 		authHeader := strings.Split(r.Header.Get("Authorization"), "Bearer ")
-// 		if len(authHeader) != 2 {
-// 			fmt.Println("Malformed token")
-// 			w.WriteHeader(http.StatusUnauthorized)
-// 			w.Write([]byte("Malformed Token"))
-// 		} else {
-// 			jwtToken := authHeader[1]
-// 			token, err := jwt.Parse(jwtToken, func(token *jwt.Token) (interface{}, error) {
-// 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-// 					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-// 				}
-// 				return []byte(SECRETKEY), nil
-// 			})
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, err := sessionStore.Get(r, "okta-custom-login-session-store")
 
-// 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-// 				ctx := context.WithValue(r.Context(), "props", claims)
-// 				// Access context values in handlers like this
-// 				// props, _ := r.Context().Value("props").(jwt.MapClaims)
-// 				next.ServeHTTP(w, r.WithContext(ctx))
-// 			} else {
-// 				fmt.Println(err)
-// 				w.WriteHeader(http.StatusUnauthorized)
-// 				w.Write([]byte("Unauthorized"))
-// 			}
-// 		}
-// 	})
-// }
+		if err != nil || session.Values["id_token"] == nil || session.Values["id_token"] == "" {
+			// Write an error and stop the handler chain
+			// http.Error(w, "Forbidden", http.StatusForbidden)
+			// http.HandleFunc("/login", LoginHandler)
+			r.RequestURI = "/"
+			next.ServeHTTP(w, r)
+		} else {
+			// Do stuff here
+			log.Println(r.RequestURI)
+			// Call the next handler, which can be another middleware in the chain, or the final handler.
+			next.ServeHTTP(w, r)
+		}
+	})
+}
 
 func main() {
 	oktaUtils.ParseEnvironment()
 
-	// http.HandleFunc("/", HomeHandler)
-	// http.HandleFunc("/login", LoginHandler)
-	// http.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
-	// http.HandleFunc("/profile", ProfileHandler)
-	// http.HandleFunc("/logout", LogoutHandler)
+	r := mux.NewRouter()
 
-	// log.Print("server starting at localhost:8080 ... ")
-	// err := http.ListenAndServe(":8080", mux)
-	// if err != nil {
-	// 	log.Printf("the HTTP server failed to start: %s", err)
-	// 	os.Exit(1)
-	// }
+	r.Use(loggingMiddleware)
 
-	// mux := http.NewServeMux()
+	r.HandleFunc("/", HomeHandler)
+	r.HandleFunc("/login", LoginHandler)
+	r.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
+	r.HandleFunc("/profile", ProfileHandler)
+	r.HandleFunc("/logout", LogoutHandler)
+	r.HandleFunc("/json", JsonHandler)
 
-	// mux.HandleFunc("/", HomeHandler)
-	// mux.HandleFunc("/login", LoginHandler)
-	// mux.HandleFunc("/authorization-code/callback", AuthCodeCallbackHandler)
-	// mux.HandleFunc("/profile", ProfileHandler)
-	// mux.HandleFunc("/logout", LogoutHandler)
-	// mux.HandleFunc("/json-output", jsonOutput)
-
-	// http.ListenAndServe(":8080", mux)
-
-	http.Handle("/", middleware(HomeHandler))
-	http.Handle("/login", middleware(LoginHandler))
-	http.Handle("/authorization-code/callback", middleware(AuthCodeCallbackHandler))
-	http.Handle("/profile", middleware(ProfileHandler))
-	http.Handle("/logout", middleware(LogoutHandler))
-	http.Handle("/json-output", middleware(jsonOutput))
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	http.ListenAndServe(":8080", r)
 }
 
 func exchangeCode(code string, r *http.Request) Exchange {
