@@ -36,25 +36,35 @@ func generateState() string {
 	return hex.EncodeToString(b)
 }
 
-func middlewareOne(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Executing middlewareOne")
-		next.ServeHTTP(w, r)
-		log.Println("Executing middlewareOne again")
-	})
-}
+// func middleware(next http.Handler) http.Handler {
+// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		authHeader := strings.Split(r.Header.Get("Authorization"), "Bearer ")
+// 		if len(authHeader) != 2 {
+// 			fmt.Println("Malformed token")
+// 			w.WriteHeader(http.StatusUnauthorized)
+// 			w.Write([]byte("Malformed Token"))
+// 		} else {
+// 			jwtToken := authHeader[1]
+// 			token, err := jwt.Parse(jwtToken, func(token *jwt.Token) (interface{}, error) {
+// 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+// 					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+// 				}
+// 				return []byte(SECRETKEY), nil
+// 			})
 
-func middlewareTwo(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Executing middlewareTwo")
-		if r.URL.Path == "/foo" {
-			return
-		}
-
-		next.ServeHTTP(w, r)
-		log.Println("Executing middlewareTwo again")
-	})
-}
+// 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+// 				ctx := context.WithValue(r.Context(), "props", claims)
+// 				// Access context values in handlers like this
+// 				// props, _ := r.Context().Value("props").(jwt.MapClaims)
+// 				next.ServeHTTP(w, r.WithContext(ctx))
+// 			} else {
+// 				fmt.Println(err)
+// 				w.WriteHeader(http.StatusUnauthorized)
+// 				w.Write([]byte("Unauthorized"))
+// 			}
+// 		}
+// 	})
+// }
 
 func main() {
 	oktaUtils.ParseEnvironment()
@@ -65,7 +75,14 @@ func main() {
 	// http.HandleFunc("/profile", ProfileHandler)
 	// http.HandleFunc("/logout", LogoutHandler)
 
-	mux := http.NewServeMux()
+	// log.Print("server starting at localhost:8080 ... ")
+	// err := http.ListenAndServe(":8080", mux)
+	// if err != nil {
+	// 	log.Printf("the HTTP server failed to start: %s", err)
+	// 	os.Exit(1)
+	// }
+
+	// mux := http.NewServeMux()
 
 	// mux.HandleFunc("/", HomeHandler)
 	// mux.HandleFunc("/login", LoginHandler)
@@ -74,27 +91,16 @@ func main() {
 	// mux.HandleFunc("/logout", LogoutHandler)
 	// mux.HandleFunc("/json-output", jsonOutput)
 
-	HomeHandler := http.HandlerFunc(HomeHandler)
-	mux.Handle("/", middlewareOne(middlewareTwo(HomeHandler)))
-	LoginHandler := http.HandlerFunc(LoginHandler)
-	mux.Handle("/login", middlewareOne(middlewareTwo(LoginHandler)))
-	AuthCodeCallbackHandler := http.HandlerFunc(AuthCodeCallbackHandler)
-	mux.Handle("/authorization-code/callback", middlewareOne(middlewareTwo(AuthCodeCallbackHandler)))
-	ProfileHandler := http.HandlerFunc(ProfileHandler)
-	mux.Handle("/profile", middlewareOne(middlewareTwo(ProfileHandler)))
-	LogoutHandler := http.HandlerFunc(LogoutHandler)
-	mux.Handle("/logout", middlewareOne(middlewareTwo(LogoutHandler)))
-	jsonOutput := http.HandlerFunc(jsonOutput)
-	mux.Handle("/json-output", middlewareOne(middlewareTwo(jsonOutput)))
+	// http.ListenAndServe(":8080", mux)
 
-	http.ListenAndServe(":8080", mux)
+	http.Handle("/", middleware(HomeHandler))
+	http.Handle("/login", middleware(LoginHandler))
+	http.Handle("/authorization-code/callback", middleware(AuthCodeCallbackHandler))
+	http.Handle("/profile", middleware(ProfileHandler))
+	http.Handle("/logout", middleware(LogoutHandler))
+	http.Handle("/json-output", middleware(jsonOutput))
 
-	// log.Print("server starting at localhost:8080 ... ")
-	// err := http.ListenAndServe(":8080", mux)
-	// if err != nil {
-	// 	log.Printf("the HTTP server failed to start: %s", err)
-	// 	os.Exit(1)
-	// }
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func exchangeCode(code string, r *http.Request) Exchange {
